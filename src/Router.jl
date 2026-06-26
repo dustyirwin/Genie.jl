@@ -105,8 +105,6 @@ end
 
 const _routes = OrderedCollections.LittleDict{Symbol,Route}()
 const _channels = OrderedCollections.LittleDict{Symbol,Channel}()
-const _routes_lock = ReentrantLock()
-const _channels_lock = ReentrantLock()
 
 
 """
@@ -189,11 +187,7 @@ function route_request(req::HTTP.Request, res::HTTP.Response; stream::Union{HTTP
 
   log_response(req, res)
 
-  # In HTTP.jl v2, Response body type is parameterized and immutable
-  # For HEAD requests, create a new Response with empty body
-  if req.method == HEAD
-    res = HTTP.Response(res.status, res.headers, body = "")
-  end
+  req.method == HEAD && (res.body = UInt8[])
 
   res
 end
@@ -232,16 +226,8 @@ function route_ws_request(req, msg::Union{String,Vector{UInt8}}, ws_client) :: S
 end
 
 
-function Base.push!(collection::OrderedCollections.LittleDict{Symbol,Route}, name::Symbol, item::Route)
-  lock(_routes_lock) do
-    Base.delete!(collection, name)[name] = item # this is to ensure that the item is always the last one in the collection
-  end
-end
-
-function Base.push!(collection::OrderedCollections.LittleDict{Symbol,Channel}, name::Symbol, item::Channel)
-  lock(_channels_lock) do
-    Base.delete!(collection, name)[name] = item # this is to ensure that the item is always the last one in the collection
-  end
+function Base.push!(collection, name::Symbol, item::Union{Route,Channel})
+  Base.delete!(collection, name)[name] = item # this is to ensure that the item is always the last one in the collection
 end
 
 
@@ -396,9 +382,7 @@ end
 Removes the route with the corresponding name from the routes collection and returns the collection of remaining routes.
 """
 function delete!(key::Symbol) :: Vector{Route}
-  lock(_routes_lock) do
-    OrderedCollections.delete!(_routes, key)
-  end
+  OrderedCollections.delete!(_routes, key)
   return routes()
 end
 
@@ -409,9 +393,7 @@ end
 Removes the channel with the corresponding name from the channels collection and returns the collection of remaining channels.
 """
 function delete_channel!(key::Symbol) :: Vector{Channel}
-  lock(_channels_lock) do
-    OrderedCollections.delete!(_channels, key)
-  end
+  OrderedCollections.delete!(_channels, key)
   return channels()
 end
 
@@ -956,11 +938,12 @@ end
 
 Populates `params` with default environment vars.
 """
-function setup_base_params(req::HTTP.Request = HTTP.Request(), res::Union{HTTP.Response,Nothing} = nothing,
+function setup_base_params(req::HTTP.Request = HTTP.Request(), res::Union{HTTP.Response,Nothing} = req.response,
                             params::Dict{Symbol,Any} = Dict{Symbol,Any}()) :: Dict{Symbol,Any}
   params[PARAMS_REQUEST_KEY]   = req
   params[PARAMS_RESPONSE_KEY]  =  if res === nothing
-                                          HTTP.Response()
+                                          req.response = HTTP.Response()
+                                          req.response
                                         else
                                           res
                                         end
