@@ -99,12 +99,22 @@ julia> package_version("Genie.jl")
 "v0.23.0"
 ```
 """
-function package_version(package::Union{Module,String}) :: String
+
+function package_version(package::Union{Module,String})::String
   isa(package, Module) && (package = String(nameof(package)))
   endswith(package, ".jl") && (package = String(package[1:end-3]))
-  pkg_dict = filter(x -> x.second.name == package, Pkg.dependencies())
-  isempty(pkg_dict) ? "master" : ("v" * string(first(pkg_dict)[2].version))
+
+  try
+    pkg_dict = filter(x -> x.second.name == package, Pkg.dependencies())
+    isempty(pkg_dict) ? "master" : ("v" * string(first(pkg_dict)[2].version))
+  catch err
+    # PackageCompiler app bundles can fail when Pkg.dependencies()
+    # tries to inspect the runtime manifest. For asset URLs, a stable
+    # fallback is safer than crashing the whole executable.
+    return "compiled"
+  end
 end
+
 
 function expr_to_path(expr::Union{Expr, Symbol, String})::String
   path = String[]
