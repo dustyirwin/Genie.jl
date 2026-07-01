@@ -266,21 +266,47 @@ end
 """
     embeded(path::String) :: String
 
-Reads and outputs the file at `path`.
+Reads and outputs the file at `path`. Modified!
 """
-function embedded(path::String) :: String
-  read(joinpath(path) |> normpath, String)
+function embedded(path::AbstractString)
+    # Fast path: original baked path works (dev machine)
+    if isfile(path)
+        return read(path, String)
+    end
+
+    # Baked path missing → try bundled-assets fallback
+    exe = try String(Base.julia_cmd().exec[1]) catch; "" end
+    if !isempty(exe)
+        bundle_root = normpath(joinpath(dirname(exe), ".."))
+        bundled = joinpath(bundle_root, "share", "app_assets")
+
+        # Pattern A: standard packages/<PKG>/<VER>/<rest>
+        m = match(r"[\\/]packages[\\/]+([^\\/]+)[\\/]+[^\\/]+[\\/]+(.+)$", path)
+        if m !== nothing
+            candidate = joinpath(bundled, m.captures[1], m.captures[2])
+            isfile(candidate) && return read(candidate, String)
+        end
+
+        # Pattern B: dev'd as <PKG>.jl/<rest>  (Genie.jl/assets/js/channels.js)
+        m = match(r"[\\/]+([A-Za-z]\w*)\.jl[\\/]+(.+)$", path)
+        if m !== nothing
+            candidate = joinpath(bundled, m.captures[1], m.captures[2])
+            isfile(candidate) && return read(candidate, String)
+        end
+
+        # Pattern C: dev'd as <depot>/dev/<PKG>/<rest>
+        m = match(r"[\\/]+dev[\\/]+([^\\/]+)[\\/]+(.+)$", path)
+        if m !== nothing
+            candidate = joinpath(bundled, m.captures[1], m.captures[2])
+            isfile(candidate) && return read(candidate, String)
+        end
+    end
+
+    @warn "Genie.Assets.embedded: asset not found" path
+    return ""
 end
 
 
-"""
-    embeded_path(path::String) :: String
-
-Returns the path relative to Genie's root package dir.
-"""
-function embedded_path(path::String) :: String
-  joinpath(@__DIR__, "..", path) |> normpath
-end
 
 """
   add_fileroute(assets_config::Genie.Assets.AssetsConfig, filename::AbstractString;
